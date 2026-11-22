@@ -88,6 +88,18 @@ gsc insights new-queries --last 28d
 gsc insights lost-queries --last 28d
 ```
 
+## Agent Skill
+
+This repository includes an Agent Skill at [`skills/gsc`](./skills/gsc/SKILL.md) so coding agents know how to safely run `gsc` for indexing audits and SEO analysis:
+
+```bash
+# Install from GitHub
+skills add xingkaixin/gsc
+
+# Or install from local checkout
+skills add .
+```
+
 ## Documentation & Attribution
 
 - [API Coverage](./docs/api-coverage.md)
