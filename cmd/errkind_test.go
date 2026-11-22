@@ -1,0 +1,124 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"testing"
+
+	"github.com/xingkaixin/gsc/internal/auth"
+	"github.com/xingkaixin/gsc/internal/client"
+)
+
+func TestErrorKind(t *testing.T) {
+	for want, err := range map[string]error{
+		"usage":                 withKind(kindUsage, errors.New("x")),
+		"auth":                  fmt.Errorf("refresh: %w", auth.ErrNoClient),
+		"permission":            &client.APIError{Status: 403},
+		"not_found":             fmt.Errorf("get: %w", &client.APIError{Status: 404}),
+		"rate_limit":            &client.APIError{Status: 429},
+		"server":                &client.APIError{Status: 503},
+		"invalid_request":       &client.APIError{Status: 400},
+		"timeout":               context.DeadlineExceeded,
+		"network":               &url.Error{Op: "Get", URL: "https://x", Err: errors.New("connection refused")},
+		"error":                 errors.New("something else"),
+		"confirmation_required": withKind(kindConfirmation, errors.New("x")),
+	} {
+		if got := errorKind(err); got != want {
+			t.Errorf("%v: got %s, want %s", err, got, want)
+		}
+	}
+}
+
+func TestErrorKindInOutput(t *testing.T) {
+	isolate(t)
+	f := newFake(t)
+	kind := func(args ...string) string {
+		r := cli(t, f, now, "", append(args, "-o", "json", "--no-input")...)
+		var e map[string]any
+		if r.code != 1 || json.Unmarshal([]byte(r.errOut), &e) != nil {
+			t.Fatalf("%v: code=%d err=%q", args, r.code, r.errOut)
+		}
+		s, _ := e["kind"].(string)
+		return s
+	}
+	for _, c := range []struct {
+		want string
+		args []string
+	}{
+		{"usage", []string{"qurey"}},
+		{"usage", []string{"sites", "lsit"}},
+		{"usage", []string{"query", "--limti", "5"}},
+		{"usage", []string{"sites", "get", "a", "b"}},
+		{"auth", []string{"sites", "list"}},
+		{"auth", []string{"sites", "list", "--profile", "nope"}},
+	} {
+		if got := kind(c.args...); got != c.want {
+			t.Errorf("%v: kind %q, want %q", c.args, got, c.want)
+		}
+	}
+	t.Setenv("GSC_ACCESS_TOKEN", "env-token")
+	for _, c := range []struct {
+		want string
+		args []string
+	}{
+		{"read_only", []string{"sites", "add", "sc-domain:x.com", "--read-only"}},
+		{"confirmation_required", []string{"sites", "remove", "sc-domain:example.com"}},
+		{"not_found", []string{"sites", "get", "sc-domain:missing.com"}},
+	} {
+		if got := kind(c.args...); got != c.want {
+			t.Errorf("%v: kind %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
+func TestQuota403IsRateLimit(t *testing.T) {
+	if got := errorKind(&client.APIError{Status: 403, Reason: "userRateLimitExceeded"}); got != "rate_limit" {
+		t.Fatalf("got %s", got)
+	}
+	if got := errorKind(&client.APIError{Status: 403, Reason: "forbidden"}); got != "permission" {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestErrorKindFromCommandBodies(t *testing.T) {
+	isolate(t)
+	t.Setenv("GSC_ACCESS_TOKEN", "env-token")
+	f := newFake(t)
+	for _, c := range []struct {
+		want string
+		args []string
+	}{
+		{"read_only", []string{"api", "PUT", "/webmasters/v3/sites/sc-domain%3Ax.com", "--read-only"}},
+		{"usage", []string{"api", "FETCH", "/x"}},
+		{"usage", []string{"completion", "tcsh"}},
+	} {
+		r := cli(t, f, now, "", append(c.args, "-o", "json", "--no-input")...)
+		var e map[string]any
+		if r.code != 1 || json.Unmarshal([]byte(r.errOut), &e) != nil || e["kind"] != c.want {
+			t.Errorf("%v: code=%d err=%q, want kind %s", c.args, r.code, r.errOut, c.want)
+		}
+	}
+}
+
+func TestInputErrorsAreUsage(t *testing.T) {
+	isolate(t)
+	t.Setenv("GSC_ACCESS_TOKEN", "env-token")
+	f := newFake(t)
+	for _, args := range [][]string{
+		{"query", "--type", "bogus"},
+		{"query", "--filter", "query > abc"},
+		{"query", "-s", "sc-domain:example.com", "--start", "2026-09-21", "--end", "2026-10-02", "--aggregation", "byNewsShowcasePanel", "--type", "googleNews"},
+		{"query", "-s", "sc-domain:example.com", "--start", "2026-09-21", "--end", "2026-10-02", "--compare", "fortnight"},
+		{"inspect"},
+		{"export"},
+	} {
+		r := cli(t, f, now, "", append(args, "-o", "json", "--no-input")...)
+		var e map[string]any
+		if r.code != 1 || r.out != "" || json.Unmarshal([]byte(r.errOut), &e) != nil || e["kind"] != "usage" {
+			t.Errorf("%v: code=%d out=%q err=%q", args, r.code, r.out, r.errOut)
+		}
+	}
+}

@@ -1,0 +1,9 @@
+bin/
+*.exe
+*.out
+.env.local
+.DS_Store
+service-account*.json
+client_secret*.json
+credentials*.json
+secrets.yaml
