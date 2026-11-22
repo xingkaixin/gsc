@@ -116,7 +116,7 @@ func newRoot(a *app) *cobra.Command {
 	f.BoolVarP(&a.yes, "yes", "y", false, "Confirm destructive commands without prompting")
 
 	root.AddCommand(a.auth(), a.configCmd(), a.sites(), a.sitemaps(), a.query(), a.performance(), a.top(), a.trend(),
-		a.freshness(), a.inspect(), a.export(), a.insights(), a.api(), a.doctor(), a.commandsCmd())
+		a.freshness(), a.inspect(), a.indexAudit(), a.export(), a.insights(), a.api(), a.doctor(), a.commandsCmd())
 	login := a.login()
 	login.Use = "login"
 	login.Short = "Alias of auth login"

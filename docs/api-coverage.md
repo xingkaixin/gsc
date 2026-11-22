@@ -21,12 +21,12 @@ full `webmasters` scope.
 | `webmasters.sites.get` | `GET webmasters/v3/sites/{siteUrl}` | Implemented | `gsc sites get` |
 | `webmasters.sites.add` | `PUT webmasters/v3/sites/{siteUrl}` | Implemented (write) | `gsc sites add` |
 | `webmasters.sites.delete` | `DELETE webmasters/v3/sites/{siteUrl}` | Implemented (write) | `gsc sites remove` |
-| `webmasters.sitemaps.list` | `GET webmasters/v3/sites/{siteUrl}/sitemaps` | Implemented | `gsc sitemaps list` |
+| `webmasters.sitemaps.list` | `GET webmasters/v3/sites/{siteUrl}/sitemaps` | Implemented | `gsc sitemaps list`, `gsc index-audit` |
 | `webmasters.sitemaps.get` | `GET webmasters/v3/sites/{siteUrl}/sitemaps/{feedpath}` | Implemented | `gsc sitemaps get` |
 | `webmasters.sitemaps.submit` | `PUT webmasters/v3/sites/{siteUrl}/sitemaps/{feedpath}` | Implemented (write) | `gsc sitemaps submit` |
 | `webmasters.sitemaps.delete` | `DELETE webmasters/v3/sites/{siteUrl}/sitemaps/{feedpath}` | Implemented (write) | `gsc sitemaps delete` |
 | `webmasters.searchanalytics.query` | `POST webmasters/v3/sites/{siteUrl}/searchAnalytics/query` | Implemented (read, despite POST) | `gsc query`, `gsc performance`, `gsc top queries`, `gsc top pages`, `gsc top countries`, `gsc top devices`, `gsc top appearance`, `gsc trend`, `gsc freshness`, `gsc export`, `gsc insights striking-distance`, `gsc insights low-ctr`, `gsc insights cannibalization`, `gsc insights decliners`, `gsc insights new-queries`, `gsc insights lost-queries` |
-| `searchconsole.urlInspection.index.inspect` | `POST v1/urlInspection/index:inspect` | Implemented (read, despite POST) | `gsc inspect` |
+| `searchconsole.urlInspection.index.inspect` | `POST v1/urlInspection/index:inspect` | Implemented (read, despite POST) | `gsc inspect`, `gsc index-audit` |
 | `searchconsole.urlTestingTools.mobileFriendlyTest.run` | `POST v1/urlTestingTools/mobileFriendlyTest:run` | Retired, skipped | none. Google retired the Mobile-Friendly Test API on 2023-12-01; the method is still in the discovery document but no longer operates. |
 
 Every request field of `searchanalytics.query` is reachable from `gsc query`: dimensions (`date`, `hour`,
