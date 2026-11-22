@@ -115,3 +115,38 @@ func TestIndexAuditURLsOnlyConsumesNoInspectionQuota(t *testing.T) {
 		t.Fatalf("unexpected output: %+v", out)
 	}
 }
+
+func TestIndexAuditConcurrencyPreservesOrderAndStopsOnQuota(t *testing.T) {
+	isolate(t)
+	f := newFake(t)
+	f.inspect = func(u string) (int, string) {
+		if strings.HasSuffix(u, "/3") {
+			return 429, `{"error":{"code":429,"message":"quota exceeded","status":"RESOURCE_EXHAUSTED"}}`
+		}
+		return 200, `{"inspectionResult":{"indexStatusResult":{"verdict":"PASS","coverageState":"Submitted and indexed"}}}`
+	}
+	tr := &auditTransport{
+		google: f,
+		sitemaps: map[string]string{
+			"https://example.com/sitemap.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/1</loc></url>
+  <url><loc>https://example.com/2</loc></url>
+  <url><loc>https://example.com/3</loc></url>
+  <url><loc>https://example.com/4</loc></url>
+</urlset>`,
+		},
+	}
+
+	r := runAuditCLI(t, tr, "index-audit", "--site", "sc-domain:example.com", "--access-token", "tok", "--concurrency", "4", "--interval", "0s", "-o", "json")
+	if r.code != 1 {
+		t.Fatalf("expected non-zero exit on quota stop, got code=%d out=%s err=%s", r.code, r.out, r.errOut)
+	}
+	var report indexAuditReport
+	if err := json.Unmarshal([]byte(r.out), &report); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, r.out)
+	}
+	if report.Stopped == "" {
+		t.Fatalf("expected stopped_reason to be set: %+v", report)
+	}
+}

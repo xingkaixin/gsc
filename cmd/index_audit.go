@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xingkaixin/gsc/internal/client"
@@ -88,7 +91,7 @@ func (l *auditURLList) Table() output.Table {
 func (a *app) indexAudit() *cobra.Command {
 	var sitemaps []string
 	var prefix, matchPattern, language string
-	var maxURLs int
+	var maxURLs, concurrency int
 	var interval time.Duration
 	var onlyUnindexed, urlsOnly bool
 
@@ -107,6 +110,9 @@ func (a *app) indexAudit() *cobra.Command {
 			ctx := cmd.Context()
 			if maxURLs <= 0 {
 				return withKind(kindUsage, errors.New("--max must be positive"))
+			}
+			if concurrency < 1 || concurrency > 10 {
+				return withKind(kindUsage, errors.New("--concurrency must be between 1 and 10"))
 			}
 			var re *regexp.Regexp
 			if matchPattern != "" {
@@ -196,48 +202,103 @@ func (a *app) indexAudit() *cobra.Command {
 				Results:    []auditItem{},
 			}
 
-			reasonCounts := map[string]int{}
+			type inspectOutcome struct {
+				done bool
+				item auditItem
+			}
+			outcomes := make([]inspectOutcome, len(targets))
+			workCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+
+			var stopOnce sync.Once
 			var stopErr error
-			for i, u := range targets {
-				if i > 0 && interval > 0 {
-					if err := a.wait(ctx, interval); err != nil {
-						stopErr = err
-						break
-					}
-				}
-				res, err := cl.Inspect(ctx, u, site, language)
-				if err != nil {
-					var api *client.APIError
-					if errors.As(err, &api) && (api.Quota() || api.Status == 401) || ctx.Err() != nil {
-						report.Stopped = err.Error()
-						stopErr = err
-						break
-					}
-					report.Errors++
-					report.Results = append(report.Results, auditItem{URL: u, Error: err.Error()})
-					continue
+			var errMu sync.Mutex
+			var completed atomic.Int64
+
+			workerCount := min(concurrency, len(targets))
+			if workerCount > 0 {
+				jobs := make(chan int)
+				var wg sync.WaitGroup
+				for range workerCount {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for idx := range jobs {
+							if workCtx.Err() != nil {
+								continue
+							}
+							u := targets[idx]
+							res, err := cl.Inspect(workCtx, u, site, language)
+							if err != nil {
+								var api *client.APIError
+								if errors.As(err, &api) && (api.Quota() || api.Status == 401) || workCtx.Err() != nil {
+									stopOnce.Do(func() {
+										stopErr = err
+										cancel()
+									})
+									continue
+								}
+								outcomes[idx] = inspectOutcome{done: true, item: auditItem{URL: u, Error: err.Error()}}
+							} else {
+								outcomes[idx] = inspectOutcome{done: true, item: buildAuditItem(u, res)}
+							}
+							if n := completed.Add(1); len(targets) > 1 && n%25 == 0 {
+								errMu.Lock()
+								a.info("Inspected %d of %d...", n, len(targets))
+								errMu.Unlock()
+							}
+						}
+					}()
 				}
 
-				item := buildAuditItem(u, res)
+				for i := range targets {
+					if workCtx.Err() != nil {
+						break
+					}
+					if i > 0 && interval > 0 {
+						if err := a.wait(workCtx, interval); err != nil {
+							stopOnce.Do(func() { stopErr = err })
+							break
+						}
+					}
+					select {
+					case jobs <- i:
+					case <-workCtx.Done():
+					}
+				}
+				close(jobs)
+				wg.Wait()
+			}
+
+			if stopErr != nil {
+				report.Stopped = stopErr.Error()
+			}
+			reasonCounts := map[string]int{}
+			for _, out := range outcomes {
+				if !out.done {
+					continue
+				}
+				if out.item.Error != "" {
+					report.Errors++
+					report.Results = append(report.Results, out.item)
+					continue
+				}
 				report.Inspected++
-				if item.Indexed {
+				if out.item.Indexed {
 					report.Indexed++
 				} else {
 					report.NotIndexed++
-					reason := item.CoverageState
+					reason := out.item.CoverageState
 					if reason == "" {
-						reason = item.Verdict
+						reason = out.item.Verdict
 					}
 					if reason == "" {
 						reason = "Unknown"
 					}
 					reasonCounts[reason]++
 				}
-				if !onlyUnindexed || !item.Indexed {
-					report.Results = append(report.Results, item)
-				}
-				if len(targets) > 1 && (i+1)%25 == 0 {
-					a.info("Inspected %d of %d...", i+1, len(targets))
+				if !onlyUnindexed || !out.item.Indexed {
+					report.Results = append(report.Results, out.item)
 				}
 			}
 
@@ -282,7 +343,8 @@ func (a *app) indexAudit() *cobra.Command {
 	c.Flags().BoolVar(&urlsOnly, "urls-only", false, "Only list discovered sitemap URLs without calling the URL Inspection API")
 	c.Flags().StringVar(&language, "language", "", "BCP 47 language for issue messages (default en-US)")
 	c.Flags().IntVar(&maxURLs, "max", 2000, "Inspect at most this many URLs (the per-property daily quota is 2,000)")
-	c.Flags().DurationVar(&interval, "interval", 120*time.Millisecond, "Pause between inspections (stays under 600 per minute)")
+	c.Flags().IntVar(&concurrency, "concurrency", 5, "Number of concurrent inspection requests (1-10)")
+	c.Flags().DurationVar(&interval, "interval", 120*time.Millisecond, "Pause between dispatching requests (stays under 600 per minute)")
 	return c
 }
 
