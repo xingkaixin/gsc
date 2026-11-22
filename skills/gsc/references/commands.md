@@ -37,7 +37,7 @@
   - `--match <RE2_REGEX>`
   - `--only-unindexed` — only include unindexed or errored URLs in `results`
   - `--urls-only` — list discovered/matched URLs without calling URL Inspection API
-  - `--max <N>` (default `2000`), `--interval <DUR>` (default `120ms`), `--language <BCP47>`
+  - `--max <N>` (default `2000`), `--concurrency <1-10>` (default `5`), `--interval <DUR>` (default `120ms`), `--language <BCP47>`
 - `gsc inspect [URL...]` — inspect specific URLs directly.
   - `--file <PATH|- >` (one URL per line, `-` for stdin), `--max`, `--interval`, `--language`.
 
