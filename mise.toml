@@ -1,0 +1,40 @@
+[tools]
+go = "1.27.4"
+
+[tasks.dev]
+description = "Run gsc locally via go run for debugging"
+run = "go run ."
+
+[tasks.build]
+description = "Compile gsc binary into bin/gsc"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p bin
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+DATE="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+MODULE="github.com/xingkaixin/gsc"
+LDFLAGS="-s -w -X ${MODULE}/internal/build.Version=${VERSION} -X ${MODULE}/internal/build.Commit=${COMMIT} -X ${MODULE}/internal/build.Date=${DATE}"
+if [ -n "${GSC_OAUTH_CLIENT_ID:-}" ] && [ -n "${GSC_OAUTH_CLIENT_SECRET:-}" ]; then
+  LDFLAGS="${LDFLAGS} -X ${MODULE}/internal/auth.BuiltinClientID=${GSC_OAUTH_CLIENT_ID} -X ${MODULE}/internal/auth.BuiltinClientSecret=${GSC_OAUTH_CLIENT_SECRET}"
+fi
+go build -ldflags "${LDFLAGS}" -o bin/gsc .
+echo "Built bin/gsc (${VERSION}, ${COMMIT})"
+"""
+
+[tasks.install]
+description = "Build and install gsc into PATH (~/.local/bin by default)"
+depends = ["build"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+mkdir -p "${INSTALL_DIR}"
+install -m 0755 bin/gsc "${INSTALL_DIR}/gsc"
+echo "Installed gsc to ${INSTALL_DIR}/gsc"
+"""
+
+[tasks.test]
+description = "Run Go test suite with race detector"
+run = "go test -race -count=1 ./..."
